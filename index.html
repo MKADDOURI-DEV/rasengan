@@ -31,6 +31,10 @@
   button:hover { background:#25306a; }
   #legend { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px; }
   .chip { font-size:13px; padding:6px 8px; background:#0e1530; border:1px solid var(--line); border-radius:10px; }
+  .add { display:grid; gap:8px; }
+  input[type=text],select { width:100%; padding:10px 12px; border-radius:12px; border:1px solid var(--line); background:#0e1530; color:var(--txt); font-size:14px; }
+  #mine { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:6px; }
+  .chip .x { flex:none; padding:0 7px; margin-left:6px; border-radius:8px; font-size:12px; }
 </style>
 </head>
 <body>
@@ -59,6 +63,17 @@
       <button id="undo">⌫ Mse7 lkelma</button>
       <button id="clear">🗑️ Mse7 kolchi</button>
     </div>
+    <h2>➕ Zid ichara dyalek (1 wla 2 ydin)</h2>
+    <div class="add">
+      <input id="newWord" type="text" placeholder="Kelma li bghiti (b7al: Salam khoya)">
+      <select id="newType">
+        <option value="pose">Wad3iya (pose) — chd l-ichara 3la 7al</option>
+        <option value="move">7araka (move) — 7rrek ydek / ydin dyalek</option>
+      </select>
+      <button id="rec">🔴 Sjjel</button>
+      <div id="recmsg" class="hint"></div>
+    </div>
+    <div id="mine"></div>
     <h2>🖐️ Lichara li kan3rf</h2>
     <div id="legend"></div>
   </section>
@@ -115,7 +130,7 @@
   const bar = $('bar');
 
   function show(k) {
-    const s = SIGNS[k];
+    const s = getSign(k);
     $('emoji').textContent  = s ? s.e : '🤚';
     $('word').textContent   = s ? s.w : 'Ma 3rftch had l-ichara';
     $('fr').textContent     = s ? s.f : 'Signe non reconnu';
@@ -131,27 +146,134 @@
     if (key !== cur) { cur = key; since = now; armed = true; show(key); }
     const p = key && armed ? Math.min(1, (now - since) / 1100) : 0;
     bar.style.width = (p * 100) + '%';
-    if (p >= 1) { sentence.push(SIGNS[key].w.split(',')[0]); armed = false; render(); }
+    if (p >= 1) { sentence.push(getSign(key).w.split(',')[0]); armed = false; render(); }
   }
   function render() { $('sentence').textContent = sentence.join('  ·  '); }
   $('undo').onclick  = () => { sentence.pop(); render(); };
   $('clear').onclick = () => { sentence.length = 0; render(); };
 
+
+  // ---- ichara dyalek: pose / move, b yed wla joj ydin ----
+  const CUSTOM = (() => { try { return JSON.parse(localStorage.getItem('signes_custom') || '[]'); } catch (e) { return []; } })();
+  const saveC = () => { try { localStorage.setItem('signes_custom', JSON.stringify(CUSTOM)); } catch (e) {} };
+  const buf = []; let rec = null, hold = 0;
+  const POSE_T = 0.28, MOVE_T = 0.40, MOVE_DUR = 1500, MOVE_W = 8;
+  const r3 = a => a.map(x => Math.round(x * 1000) / 1000);
+  const esc = t => t.replace(/[&<>"]/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[ch]));
+  const msg = t => { $('recmsg').textContent = t; };
+
+  function getSign(k) {
+    if (SIGNS[k]) return SIGNS[k];
+    const t = CUSTOM.find(x => 'c' + x.id === k);
+    return t ? { e: t.type === 'move' ? '🌀' : '⭐', w: t.w, f: (t.type === 'move' ? '7araka' : 'Wad3iya') + ' dyalek · ' + t.n + ' yed' } : null;
+  }
+
+  // vecteur normalisé (taille de la main) ; les mains sont triées gauche -> droite
+  function feat(all) {
+    const W = v.videoWidth, H = v.videoHeight;
+    const sz = lm => Math.hypot((lm[0].x - lm[9].x) * W, (lm[0].y - lm[9].y) * H) || 1;
+    const hs = all.slice().sort((a, b) => a[0].x - b[0].x), shape = [], pos = [];
+    hs.forEach(lm => { const s = sz(lm); lm.forEach(p => shape.push((p.x - lm[0].x) * W / s, (p.y - lm[0].y) * H / s)); });
+    if (hs[1]) { const s = sz(hs[0]); pos.push((hs[1][0].x - hs[0][0].x) * W / s, (hs[1][0].y - hs[0][0].y) * H / s); }
+    return { n: hs.length, vec: shape.concat(pos), abs: [hs[0][0].x * W / H * 4, hs[0][0].y * 4] };
+  }
+  const rms = (a, b) => { let s = 0; for (let i = 0; i < a.length; i++) { const d = a[i] - b[i]; s += d * d; } return Math.sqrt(s / a.length); };
+
+  // 10 images régulièrement espacées, + déplacement du poignet depuis la 1ère image
+  function seqOf(frames) {
+    const t0 = frames[0].t, t1 = frames[frames.length - 1].t, a0 = frames[0].f.abs, out = [];
+    for (let i = 0; i < 10; i++) {
+      const tt = t0 + (t1 - t0) * i / 9; let b = frames[0];
+      for (const fr of frames) if (Math.abs(fr.t - tt) < Math.abs(b.t - tt)) b = fr;
+      out.push(b.f.vec.concat([(b.f.abs[0] - a0[0]) * MOVE_W, (b.f.abs[1] - a0[1]) * MOVE_W]));
+    }
+    return out;
+  }
+  function matchPose(f) {
+    let best = null, bd = POSE_T;
+    CUSTOM.forEach(t => { if (t.type !== 'pose' || t.n !== f.n) return; const d = rms(f.vec, t.vec); if (d < bd) { bd = d; best = 'c' + t.id; } });
+    return best;
+  }
+  function matchMove(now) {
+    const win = buf.filter(x => now - x.t <= MOVE_DUR);
+    if (win.length < 8 || win[0].t > now - MOVE_DUR + 200) return null;
+    let best = null, bd = MOVE_T;
+    CUSTOM.forEach(t => {
+      if (t.type !== 'move' || win.some(x => x.f.n !== t.n)) return;
+      const q = seqOf(win); let d = 0;
+      for (let i = 0; i < 10; i++) d += rms(q[i], t.seq[i]);
+      d /= 10; if (d < bd) { bd = d; best = 'c' + t.id; }
+    });
+    return best;
+  }
+
+  function renderMine() {
+    $('mine').innerHTML = CUSTOM.map(t =>
+      `<div class="chip">${t.type === 'move' ? '🌀' : '⭐'} ${esc(t.w)} · ${t.n}✋<button class="x" data-id="${t.id}">✕</button></div>`).join('');
+  }
+  $('mine').onclick = e => {
+    const id = e.target.dataset && e.target.dataset.id; if (!id) return;
+    const i = CUSTOM.findIndex(x => String(x.id) === id); if (i >= 0) { CUSTOM.splice(i, 1); saveC(); renderMine(); }
+  };
+  renderMine();
+
+  $('rec').onclick = () => {
+    const w = $('newWord').value.trim(), type = $('newType').value;
+    if (rec) return;
+    if (!w) { msg('Kteb l-kelma lawla.'); return; }
+    rec = { phase: 'count', frames: [] }; let n = 3; msg('Wajjed ydek… ' + n);
+    const iv = setInterval(() => {
+      if (--n > 0) { msg('Wajjed ydek… ' + n); return; }
+      clearInterval(iv); rec.phase = 'rec';
+      msg('🔴 Kan-sajjel… ' + (type === 'move' ? 'dir l-7araka daba' : 'chd l-wad3iya'));
+      setTimeout(() => finish(w, type), type === 'move' ? MOVE_DUR + 100 : 700);
+    }, 1000);
+  };
+  function finish(w, type) {
+    const fr = rec.frames; rec = null;
+    const cnt = k => fr.filter(x => x.f.n === k).length, n = cnt(2) > cnt(1) ? 2 : 1;
+    const ok = fr.filter(x => x.f.n === n);
+    if (ok.length < (type === 'move' ? 12 : 5) || ok.length < fr.length * 0.8) { msg('❌ L-caméra ma chafatch ydik mzyan, 3awed.'); return; }
+    const t = { id: Date.now(), w, type, n };
+    if (type === 'pose') t.vec = r3(ok[0].f.vec.map((_, i) => ok.reduce((s, x) => s + x.f.vec[i], 0) / ok.length));
+    else t.seq = seqOf(ok).map(r3);
+    CUSTOM.push(t); saveC(); renderMine(); $('newWord').value = '';
+    msg('✅ Tzadet: ' + w + ' (' + n + ' yed)');
+  }
+
   // ---- MediaPipe ----
   const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+  hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
   hands.onResults(res => {
     c.width = v.videoWidth; c.height = v.videoHeight;
     g.clearRect(0, 0, c.width, c.height);
-    const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
-    if (!lm) { update(null); return; }
+    const all = res.multiHandLandmarks || [];
+    const now = performance.now();
+    if (!all.length) { buf.length = 0; if (now > hold && !rec) update(null); return; }
+
     g.lineWidth = 3; g.strokeStyle = '#5ad1ff'; g.fillStyle = '#fff';
-    (window.HAND_CONNECTIONS || []).forEach(([a, b]) => {
-      g.beginPath(); g.moveTo(lm[a].x * c.width, lm[a].y * c.height);
-      g.lineTo(lm[b].x * c.width, lm[b].y * c.height); g.stroke();
+    all.forEach(lm => {
+      (window.HAND_CONNECTIONS || []).forEach(([a, b]) => {
+        g.beginPath(); g.moveTo(lm[a].x * c.width, lm[a].y * c.height);
+        g.lineTo(lm[b].x * c.width, lm[b].y * c.height); g.stroke();
+      });
+      lm.forEach(p => { g.beginPath(); g.arc(p.x * c.width, p.y * c.height, 4, 0, 7); g.fill(); });
     });
-    lm.forEach(p => { g.beginPath(); g.arc(p.x * c.width, p.y * c.height, 4, 0, 7); g.fill(); });
-    update(classify(lm));
+
+    const f = feat(all);
+    buf.push({ t: now, f });
+    while (buf.length && now - buf[0].t > 2500) buf.shift();
+    if (rec) { if (rec.phase === 'rec') rec.frames.push({ t: now, f }); return; }
+    if (now < hold) return;
+
+    const mv = matchMove(now);                       // 7araka dyalek -> kat-tzaf b7al
+    if (mv) {
+      hold = now + MOVE_DUR; cur = null; bar.style.width = '0%';
+      sentence.push(getSign(mv).w); render(); show(mv); return;
+    }
+    let key = matchPose(f);                          // wad3iya dyalek (1 wla 2 ydin)
+    if (!key && all.length === 1) key = classify(all[0]);
+    update(key);
   });
 
   async function start() {
