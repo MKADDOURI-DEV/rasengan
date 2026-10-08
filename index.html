@@ -1,400 +1,173 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="fr">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Rasengan</title>
-
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
-
-  <style>
-    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: system-ui, sans-serif; }
-
-    .layer {
-      position: fixed; inset: 0;
-      width: 100vw; height: 100vh;
-      object-fit: cover;
-      transform: scaleX(-1);
-    }
-    #cam      { z-index: 0; }
-    #skeleton { z-index: 2; pointer-events: none; }
-    #fx       { z-index: 11; pointer-events: none; }
-
-    .vignette {
-      position: fixed; inset: 0;
-      background: radial-gradient(ellipse at center, transparent 35%, rgba(0,0,0,0.55) 100%);
-      pointer-events: none; z-index: 4;
-    }
-
-    .rasengan {
-      position: fixed; top: 0; left: 0;
-      width: 1500px; height: auto;
-      transform: translate(-50%, -50%);
-      pointer-events: none;
-      mix-blend-mode: screen;
-      opacity: 0;
-      will-change: opacity, left, top;
-      z-index: 10;
-    }
-
-    #hint {
-      position: fixed; bottom: 16px; left: 50%;
-      transform: translateX(-50%);
-      color: #cfe9ff; font-size: 14px; letter-spacing: 0.04em;
-      background: rgba(0,0,0,0.45);
-      padding: 6px 12px; border-radius: 999px;
-      z-index: 12; pointer-events: none;
-    }
-  </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ichara → Kalimat</title>
+<style>
+  :root { --bg:#0b1020; --card:#141b34; --line:#26305a; --txt:#e8ecff; --mut:#8c97c7; --acc:#5ad1ff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; min-height:100%; background:radial-gradient(1200px 600px at 20% -10%, #1b2658, var(--bg)); color:var(--txt); font-family:system-ui,-apple-system,"Segoe UI",sans-serif; }
+  main { display:grid; grid-template-columns:1fr 1fr; gap:16px; padding:16px; max-width:1200px; margin:0 auto; }
+  @media (max-width:820px){ main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:20px; padding:14px; display:flex; flex-direction:column; gap:12px; }
+  h2 { margin:0; font-size:15px; font-weight:600; color:var(--mut); letter-spacing:.04em; text-transform:uppercase; }
+  .stage { position:relative; aspect-ratio:4/3; border-radius:14px; overflow:hidden; background:#000; }
+  .stage video,.stage canvas { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transform:scaleX(-1); }
+  #msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; text-align:center; padding:20px; color:#fff; background:rgba(0,0,0,.55); font-size:15px; }
+  #now { text-align:center; padding:6px 0 2px; }
+  #emoji { font-size:92px; line-height:1.1; }
+  #word { font-size:30px; font-weight:700; margin-top:4px; }
+  #fr { color:var(--mut); font-size:15px; min-height:20px; }
+  #letter { display:inline-block; margin-top:8px; padding:3px 12px; border-radius:99px; background:#1e2a55; color:var(--acc); font-weight:700; min-height:0; }
+  #letter:empty { display:none; }
+  .track { height:8px; background:#1e2850; border-radius:99px; overflow:hidden; }
+  #bar { height:100%; width:0; background:linear-gradient(90deg,#5ad1ff,#8b7bff); transition:width .08s linear; }
+  .hint { font-size:12px; color:var(--mut); margin-top:-6px; }
+  #sentence { min-height:54px; padding:10px 12px; background:#0e1530; border:1px dashed var(--line); border-radius:12px; font-size:19px; }
+  #sentence:empty::before { content:"Jomla dyalek ghadi tban hna…"; color:#59639a; }
+  .row { display:flex; gap:8px; }
+  button { flex:1; padding:10px; border-radius:12px; border:1px solid var(--line); background:#1b2450; color:var(--txt); font-size:14px; cursor:pointer; }
+  button:hover { background:#25306a; }
+  #legend { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:6px; }
+  .chip { font-size:13px; padding:6px 8px; background:#0e1530; border:1px solid var(--line); border-radius:10px; }
+</style>
 </head>
 <body>
-  <video  id="cam"      class="layer" autoplay playsinline muted></video>
-  <canvas id="skeleton" class="layer"></canvas>
-  <div    class="vignette"></div>
-  <canvas id="fx"       class="layer"></canvas>
-  <div    id="hint"></div>
+<main>
+  <section class="card">
+    <h2>📷 Camera</h2>
+    <div class="stage">
+      <video id="v" playsinline muted></video>
+      <canvas id="c"></canvas>
+      <div id="msg">Kan7ell l-caméra… 9bel l-permission.</div>
+    </div>
+  </section>
 
-  <video class="rasengan" data-slot="0" src="assets/rasengan.mp4" muted autoplay loop playsinline preload="auto"></video>
-  <video class="rasengan" data-slot="1" src="assets/rasengan.mp4" muted autoplay loop playsinline preload="auto"></video>
+  <section class="card">
+    <h2>💬 Texte</h2>
+    <div id="now">
+      <div id="emoji">🤚</div>
+      <div id="word">7ett ydek qoddam l-caméra</div>
+      <div id="fr">Montre ta main à la caméra</div>
+      <div id="letter"></div>
+    </div>
+    <div class="track"><div id="bar"></div></div>
+    <div class="hint">Chd nfs l-ichara ~1 tanya bach tzaf f l-jomla.</div>
+    <div id="sentence"></div>
+    <div class="row">
+      <button id="undo">⌫ Mse7 lkelma</button>
+      <button id="clear">🗑️ Mse7 kolchi</button>
+    </div>
+    <h2>🖐️ Lichara li kan3rf</h2>
+    <div id="legend"></div>
+  </section>
+</main>
 
-  <script>
-    const camVideo = document.getElementById('cam');
-    const canvas   = document.getElementById('skeleton');
-    const pen      = canvas.getContext('2d');
-    const orbs     = Array.from(document.querySelectorAll('.rasengan'));
-    const fx       = document.getElementById('fx');
-    const fxPen    = fx.getContext('2d');
-    const hint     = document.getElementById('hint');
-    const HINT_DEFAULT = '🖐️ main ouverte = Rasengan  ·  🤝 une main tient le poignet de l\'autre = Chidori  ·  🙌 deux mains collées = Kamehameha';
-    hint.textContent = HINT_DEFAULT;
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  const v = $('v'), c = $('c'), g = c.getContext('2d');
 
-    // Two distinct palettes so each hand's skeleton is obviously different,
-    // and bones vs joints inside one hand are also different colors.
-    const PALETTES = {
-      Left:  { bone: '#ff8a3d', joint: '#fff36a', glow: '#ff5e1a' }, // warm — Naruto orange
-      Right: { bone: '#62f0ff', joint: '#ff66e0', glow: '#1aa6ff' }  // cool — chakra blue
-    };
+  // e = emoji, l = lettre (optionnel), w = kelma b darija, f = français
+  const SIGNS = {
+    five:  { e:'🖐️', l:'5', w:'Salam',          f:'Bonjour / 5' },
+    four:  { e:'🖖',  l:'B', w:'Rb3a',           f:'Quatre / lettre B' },
+    three: { e:'3️⃣', l:'W', w:'Tlata',          f:'Trois / lettre W' },
+    two:   { e:'✌️',  l:'V', w:'Joj',            f:'Deux / Paix / lettre V' },
+    one:   { e:'☝️',  l:'D', w:'Wa7ed',          f:'Un / lettre D' },
+    pinky: { e:'🤙',  l:'I', w:'Sghir',          f:'Petit / lettre I' },
+    L:     { e:'👆',  l:'L', w:'Hna',            f:'Ici / lettre L' },
+    call:  { e:'🤙',  l:'Y', w:'Sifet liya',     f:'Appelle-moi / lettre Y' },
+    love:  { e:'🤟',        w:'Kan7ebbek',       f:'Je t’aime' },
+    rock:  { e:'🤘',        w:'Mzyan bzzaf',     f:'Super / Rock' },
+    ok:    { e:'👌',  l:'F', w:'OK, mzyan',      f:'D’accord / lettre F' },
+    fist:  { e:'✊',  l:'A', w:'Wa9ef',          f:'Stop / lettre A' },
+    up:    { e:'👍',        w:'Iyeh, mzyan',     f:'Oui / Bien' },
+    down:  { e:'👎',        w:'La, machi mzyan', f:'Non / Pas bien' }
+  };
+  // thumb,index,middle,ring,pinky  (1 = étendu)
+  const PAT = { '11111':'five','01111':'four','01110':'three','01100':'two','01000':'one',
+                '00001':'pinky','11000':'L','10001':'call','11001':'love','01001':'rock','00000':'fist' };
 
-    // Per-hand fade-in / fade-out state for the orbs.
-    const orbState = [
-      { charge: 0, wasOpen: false },
-      { charge: 0, wasOpen: false }
-    ];
+  $('legend').innerHTML = Object.values(SIGNS)
+    .map(s => `<div class="chip">${s.e} ${s.l ? '<b>' + s.l + '</b> · ' : ''}${s.w}</div>`).join('');
 
-
-    // ---- combo-start ----------------------------------------------------
-    // Seuils (en multiples de la taille de la main) — modifiables.
-    const CFG = {
-      chidoriGrab:  0.75, // paume de la main A <-> poignet de la main B
-      chidoriApart: 0.60, // poignet A <-> poignet B (sinon c'est un Kamehameha)
-      kameWrists:   1.10, // poignet <-> poignet
-      kamePalms:    1.20, // paume <-> paume
-      kameFireDelay: 0.7  // secondes de charge à fond avant que le rayon parte
-    };
-
-    const clamp01 = v => Math.max(0, Math.min(1, v));
-    const px   = (lm, i) => ({ x: lm[i].x * canvas.width, y: lm[i].y * canvas.height });
-    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-
-    // Retourne { type:'chidori', held, hs } | { type:'kame', A, B, hs } | null
-    function detectCombo(hands) {
-      if (!hands || hands.length < 2) return null;
-      const [A, B] = hands;
-      const hs = (dist(px(A, 0), px(A, 9)) + dist(px(B, 0), px(B, 9))) / 2;
-      if (hs < 1) return null;
-
-      // Chidori: la paume d'une main tient le poignet de l'autre
-      for (const [holder, held] of [[A, B], [B, A]]) {
-        const grab  = dist(px(holder, 9), px(held, 0)) < hs * CFG.chidoriGrab;
-        const apart = dist(px(holder, 0), px(held, 0)) > hs * CFG.chidoriApart;
-        if (grab && apart) return { type: 'chidori', held, hs };
-      }
-
-      // Kamehameha: les deux mains sont collées l'une à l'autre
-      const wr = dist(px(A, 0), px(B, 0)) < hs * CFG.kameWrists;
-      const pm = dist(px(A, 9), px(B, 9)) < hs * CFG.kamePalms;
-      if (wr && pm) return { type: 'kame', A, B, hs };
-
-      return null;
+  function classify(lm) {
+    const W = v.videoWidth, H = v.videoHeight;
+    const d = (a, b) => Math.hypot((lm[a].x - lm[b].x) * W, (lm[a].y - lm[b].y) * H);
+    const hs = d(0, 9);
+    if (hs < 5) return null;
+    const fingers = [[8,6],[12,10],[16,14],[20,18]].map(([t, p]) => d(t, 0) > d(p, 0) * 1.05);
+    const thumb = d(4, 5) > hs * 0.6;
+    if (d(4, 8) < hs * 0.3 && fingers[1] && fingers[2] && fingers[3]) return 'ok';
+    const key = [thumb, ...fingers].map(b => +b).join('');
+    if (key === '10000') {
+      const dy = (lm[4].y - lm[0].y) * H;
+      return dy < -hs * 0.8 ? 'up' : dy > hs * 0.8 ? 'down' : 'fist';
     }
-    // ---- combo-end ------------------------------------------------------
+    return PAT[key] || null;
+  }
 
-    const FINGER_TIPS     = [8, 12, 16, 20];
-    const FINGER_KNUCKLES = [6, 10, 14, 18];
+  // ---- affichage + jomla ----
+  const sentence = [];
+  let hist = [], cur = null, since = 0, armed = true;
+  const bar = $('bar');
 
-    function isPalmOpen(lm) {
-      const wrist = lm[0];
-      let extended = 0;
-      for (let i = 0; i < FINGER_TIPS.length; i++) {
-        const tip = lm[FINGER_TIPS[i]];
-        const knk = lm[FINGER_KNUCKLES[i]];
-        const dTip = Math.hypot(tip.x - wrist.x, tip.y - wrist.y);
-        const dKnk = Math.hypot(knk.x - wrist.x, knk.y - wrist.y);
-        if (dTip > dKnk) extended++;
-      }
-      return extended >= 3;
-    }
+  function show(k) {
+    const s = SIGNS[k];
+    $('emoji').textContent  = s ? s.e : '🤚';
+    $('word').textContent   = s ? s.w : 'Ma 3rftch had l-ichara';
+    $('fr').textContent     = s ? s.f : 'Signe non reconnu';
+    $('letter').textContent = s && s.l ? 'Lettre : ' + s.l : '';
+  }
+  function update(k) {
+    hist.push(k); if (hist.length > 7) hist.shift();
+    const counts = {};
+    hist.forEach(x => counts[x] = (counts[x] || 0) + 1);
+    const top = Object.keys(counts).sort((a, b) => counts[b] - counts[a])[0];
+    const key = top === 'null' ? null : top;
+    const now = performance.now();
+    if (key !== cur) { cur = key; since = now; armed = true; show(key); }
+    const p = key && armed ? Math.min(1, (now - since) / 1100) : 0;
+    bar.style.width = (p * 100) + '%';
+    if (p >= 1) { sentence.push(SIGNS[key].w.split(',')[0]); armed = false; render(); }
+  }
+  function render() { $('sentence').textContent = sentence.join('  ·  '); }
+  $('undo').onclick  = () => { sentence.pop(); render(); };
+  $('clear').onclick = () => { sentence.length = 0; render(); };
 
-    // Draw bones in one color, joints in another, with a colored glow,
-    // so the tracking sticks visibly follow each finger.
-    function paintSkeleton(lm, colors) {
-      pen.save();
-      pen.shadowBlur  = 18;
-      pen.shadowColor = colors.glow;
-      drawConnectors(pen, lm, HAND_CONNECTIONS, { color: colors.bone, lineWidth: 3 });
-      pen.restore();
-
-      pen.save();
-      pen.shadowBlur  = 10;
-      pen.shadowColor = colors.glow;
-      pen.fillStyle   = colors.joint;
-      for (const p of lm) {
-        pen.beginPath();
-        pen.arc(p.x * canvas.width, p.y * canvas.height, 3.5, 0, Math.PI * 2);
-        pen.fill();
-      }
-      pen.restore();
-    }
-
-    function placeOrb(slot, lm, charge) {
-      const wrist  = lm[0];
-      const midKnk = lm[9];
-
-      const cx = (wrist.x + midKnk.x) / 2;
-      const cy = (wrist.y + midKnk.y) / 2;
-      const handSize = Math.hypot(midKnk.x - wrist.x, midKnk.y - wrist.y);
-      const lift = handSize * 1.8;
-
-      const orb = orbs[slot];
-      orb.style.left    = `${(1 - cx) * window.innerWidth}px`;
-      orb.style.top     = `${(cy - lift) * window.innerHeight}px`;
-      orb.style.opacity = charge.toFixed(3);
-    }
-
-
-    // ---------- Effets Chidori / Kamehameha (dessinés en code, sans vidéo) ----------
-    const fxState = {
-      chidori: { amt: 0, pos: null, hs: 0 },
-      kame:    { amt: 0, pos: null, hs: 0, dir: { x: 1, y: 0 }, fire: 0, beam: 0 }
-    };
-
-    function updateCombo(combo) {
-      const c = fxState.chidori, k = fxState.kame;
-      c.amt = clamp01(c.amt + (combo && combo.type === 'chidori' ? 0.12 : -0.15));
-      k.amt = clamp01(k.amt + (combo && combo.type === 'kame'    ? 0.04 : -0.10));
-
-      if (combo && combo.type === 'chidori') {
-        const w = px(combo.held, 0), m = px(combo.held, 9);
-        c.pos = { x: m.x + (m.x - w.x) * 0.5, y: m.y + (m.y - w.y) * 0.5 };
-        c.hs  = combo.hs;
-      }
-
-      if (combo && combo.type === 'kame') {
-        const { A, B } = combo;
-        const a9 = px(A, 9), b9 = px(B, 9);
-        k.pos = { x: (a9.x + b9.x) / 2, y: (a9.y + b9.y) / 2 };
-        k.hs  = combo.hs;
-
-        // Direction du rayon = là où pointent les doigts (poignet -> paume)
-        const a0 = px(A, 0), b0 = px(B, 0);
-        let dx = (a9.x - a0.x) + (b9.x - b0.x);
-        let dy = (a9.y - a0.y) + (b9.y - b0.y);
-        let len = Math.hypot(dx, dy);
-        if (len < combo.hs * 0.8) {          // mains pointées vers la caméra -> rayon horizontal
-          dx = k.pos.x < canvas.width / 2 ? 1 : -1; dy = 0; len = 1;
-        }
-        dx /= len; dy /= len;
-        k.dir.x += (dx - k.dir.x) * 0.3;
-        k.dir.y += (dy - k.dir.y) * 0.3;
-        const n = Math.hypot(k.dir.x, k.dir.y) || 1;
-        k.dir.x /= n; k.dir.y /= n;
-      }
-
-      hint.textContent = combo
-        ? (combo.type === 'chidori' ? '⚡ CHIDORI !' : '🌊 KA-ME-HA-ME-HAAA !')
-        : HINT_DEFAULT;
-    }
-
-    function jaggedPath(x, y, angle, len, segs = 9) {
-      const pts = [{ x, y }];
-      let cx = x, cy = y;
-      for (let i = 0; i < segs; i++) {
-        const a = angle + (Math.random() - 0.5) * 1.0;
-        cx += Math.cos(a) * len / segs;
-        cy += Math.sin(a) * len / segs;
-        pts.push({ x: cx, y: cy });
-      }
-      return pts;
-    }
-    function strokePts(ctx, pts) {
-      ctx.beginPath();
-      ctx.moveTo(pts[0].x, pts[0].y);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
-      ctx.stroke();
-    }
-
-    function drawChidori(ctx, c) {
-      const { x, y } = c.pos, r = c.hs * 0.75 * c.amt;
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r * 1.8);
-      g.addColorStop(0,   'rgba(255,255,255,0.95)');
-      g.addColorStop(0.3, 'rgba(150,215,255,0.75)');
-      g.addColorStop(1,   'rgba(40,90,255,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(x, y, r * 1.8, 0, Math.PI * 2); ctx.fill();
-
-      ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-      for (let i = 0; i < 10; i++) {
-        const pts = jaggedPath(x, y, Math.random() * Math.PI * 2,
-                               c.hs * (0.9 + Math.random() * 1.5) * c.amt);
-        ctx.shadowBlur = 25; ctx.shadowColor = '#4aa8ff';
-        ctx.strokeStyle = 'rgba(110,185,255,0.55)'; ctx.lineWidth = 6; strokePts(ctx, pts);
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2; strokePts(ctx, pts);
-      }
-    }
-
-    function drawKame(ctx, k, t) {
-      const { x, y } = k.pos;
-      const r = k.hs * (0.45 + 0.8 * k.amt) * (1 + 0.06 * Math.sin(t * 18));
-
-      // anneaux d'énergie qui convergent vers la boule
-      for (let i = 0; i < 3; i++) {
-        const ph = (t * 0.9 + i / 3) % 1;
-        ctx.strokeStyle = `rgba(140,220,255,${((1 - ph) * 0.5 * k.amt).toFixed(3)})`;
-        ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.arc(x, y, r * (2.8 - 1.9 * ph), 0, Math.PI * 2); ctx.stroke();
-      }
-
-      // le rayon
-      if (k.beam > 0.01) {
-        const len = Math.hypot(canvas.width, canvas.height) * 1.2 * k.beam;
-        const ex = x + k.dir.x * len, ey = y + k.dir.y * len;
-        const w  = k.hs * (0.9 + 0.2 * Math.sin(t * 25)) * Math.min(1, k.beam * 1.5);
-        ctx.lineCap = 'round';
-        ctx.shadowBlur = 45; ctx.shadowColor = '#2aa0ff';
-        ctx.strokeStyle = 'rgba(60,160,255,0.45)';  ctx.lineWidth = w * 1.8;
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
-        ctx.strokeStyle = 'rgba(150,230,255,0.85)'; ctx.lineWidth = w;
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
-        ctx.shadowBlur = 0;
-        ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = w * 0.45;
-        ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(ex, ey); ctx.stroke();
-      }
-
-      // la boule
-      const g = ctx.createRadialGradient(x, y, 0, x, y, r * 1.6);
-      g.addColorStop(0,    'rgba(255,255,255,1)');
-      g.addColorStop(0.35, 'rgba(160,235,255,0.9)');
-      g.addColorStop(1,    'rgba(0,120,255,0)');
-      ctx.fillStyle = g;
-      ctx.beginPath(); ctx.arc(x, y, r * 1.6, 0, Math.PI * 2); ctx.fill();
-    }
-
-    let lastT = performance.now();
-    function fxLoop(now) {
-      const dt = Math.min(0.1, (now - lastT) / 1000);
-      lastT = now;
-      const t = now / 1000;
-
-      if (fx.width !== canvas.width || fx.height !== canvas.height) {
-        fx.width = canvas.width; fx.height = canvas.height;
-      }
-      fxPen.clearRect(0, 0, fx.width, fx.height);
-
-      const c = fxState.chidori, k = fxState.kame;
-
-      // le rayon part après quelques instants de charge à fond
-      if (k.amt >= 1) k.fire += dt; else k.fire = 0;
-      const beamTarget = k.fire > CFG.kameFireDelay ? 1 : 0;
-      k.beam += (beamTarget - k.beam) * (beamTarget ? 0.25 : 0.4);
-
-      fxPen.save();
-      fxPen.globalCompositeOperation = 'lighter';
-      if (c.amt > 0.01 && c.pos) drawChidori(fxPen, c);
-      if (k.amt > 0.01 && k.pos) drawKame(fxPen, k, t);
-      fxPen.restore();
-
-      requestAnimationFrame(fxLoop);
-    }
-    requestAnimationFrame(fxLoop);
-
-    // Une main = un emplacement de rasengan. Avec deux mains on se base sur la
-    // position (gauche/droite dans l'image) car MediaPipe donne parfois le même
-    // label "Left"/"Right" aux deux mains.
-    function assignSlots(lms, labels) {
-      const slots = lms.map((_, i) => (labels[i] && labels[i].label === 'Right') ? 1 : 0);
-      if (lms.length === 2) {
-        const first = lms[0][0].x <= lms[1][0].x ? 0 : 1;
-        slots[first] = 0;
-        slots[1 - first] = 1;
-      }
-      return slots;
-    }
-
-    function onResults(res) {
-      canvas.width  = camVideo.videoWidth  || canvas.clientWidth;
-      canvas.height = camVideo.videoHeight || canvas.clientHeight;
-      pen.clearRect(0, 0, canvas.width, canvas.height);
-
-      const lms    = res.multiHandLandmarks || [];
-      const labels = res.multiHandedness    || [];
-      const slots  = assignSlots(lms, labels);
-      const combo  = detectCombo(lms);
-      updateCombo(combo);
-
-      const seen = [false, false];
-
-      lms.forEach((lm, i) => {
-        const slot   = slots[i];
-        const colors = PALETTES[slot === 1 ? 'Right' : 'Left'];
-        seen[slot]   = true;
-
-        paintSkeleton(lm, colors);
-
-        // pendant un Chidori / Kamehameha, pas de Rasengan
-        const open = !combo && isPalmOpen(lm);
-        const st   = orbState[slot];
-        st.charge  = Math.max(0, Math.min(1, st.charge + (open ? 0.06 : -0.18)));
-
-        if (open && !st.wasOpen) {
-          const v = orbs[slot];
-          v.currentTime = 0;
-          v.play().catch(err => console.warn('rasengan play failed', err));
-        }
-        st.wasOpen = open;
-
-        if (st.charge > 0.01) placeOrb(slot, lm, st.charge);
-        else orbs[slot].style.opacity = 0;
-      });
-
-      // Decay any hand we didn't see this frame.
-      for (let i = 0; i < 2; i++) {
-        if (seen[i]) continue;
-        orbState[i].charge  = Math.max(0, orbState[i].charge - 0.18);
-        orbState[i].wasOpen = false;
-        orbs[i].style.opacity = orbState[i].charge.toFixed(3);
-      }
-    }
-
-    const hands = new Hands({
-      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  // ---- MediaPipe ----
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+  hands.onResults(res => {
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    g.clearRect(0, 0, c.width, c.height);
+    const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+    if (!lm) { update(null); return; }
+    g.lineWidth = 3; g.strokeStyle = '#5ad1ff'; g.fillStyle = '#fff';
+    (window.HAND_CONNECTIONS || []).forEach(([a, b]) => {
+      g.beginPath(); g.moveTo(lm[a].x * c.width, lm[a].y * c.height);
+      g.lineTo(lm[b].x * c.width, lm[b].y * c.height); g.stroke();
     });
-    hands.setOptions({
-      maxNumHands: 2,
-      modelComplexity: 1,
-      minDetectionConfidence: 0.65,
-      minTrackingConfidence:  0.65
-    });
-    hands.onResults(onResults);
+    lm.forEach(p => { g.beginPath(); g.arc(p.x * c.width, p.y * c.height, 4, 0, 7); g.fill(); });
+    update(classify(lm));
+  });
 
-    const camera = new Camera(camVideo, {
-      onFrame: async () => { await hands.send({ image: camVideo }); },
-      width:  1280,
-      height: 720
-    });
-    camera.start();
-  </script>
+  async function start() {
+    try {
+      v.srcObject = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 1280, height: 720 }, audio: false });
+      await v.play();
+      $('msg').remove();
+      (async function loop() {
+        if (v.readyState >= 2) await hands.send({ image: v });
+        requestAnimationFrame(loop);
+      })();
+    } catch (e) {
+      $('msg').textContent = 'L-caméra ma tbdatch. Fte7 had l-page mn http://localhost wla https:// w 9bel l-permission. (' + e.name + ')';
+    }
+  }
+  start();
+</script>
 </body>
 </html>
